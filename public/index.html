@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lista de transmissão</title>
+<style>
+:root{--bg:#f3f6f4;--card:#fff;--ink:#14231c;--mute:#5b6b63;--brand:#0b6b4f;--line:#d9e2dd;--err:#b3261e}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1712;--card:#16221b;--ink:#e6f0ea;--mute:#93a69b;--brand:#3ecf9a;--line:#26372d}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif;padding:16px}
+main{max-width:640px;margin:auto;display:grid;gap:16px}h1{font-size:1.5rem;margin:8px 0 0}h2{font-size:1.05rem;margin:0 0 10px}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+input,textarea,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;margin-bottom:10px}
+input[type=checkbox]{width:auto;margin:0 10px 0 0}
+button{background:var(--brand);color:var(--bg);border:0;border-radius:8px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer;margin-right:8px}
+button.sec{background:none;color:var(--brand);border:1px solid var(--brand)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+#box{max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+label.c{display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer}
+.mute{color:var(--mute);font-size:.9rem}.code{font-size:2rem;letter-spacing:.2em;font-weight:700}
+img{max-width:260px;width:100%}[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Lista de transmissão</h1>
+
+<section id="conn">
+  <h2>1. Conectar o WhatsApp</h2>
+  <p id="st" class="mute">Verificando…</p>
+  <div id="qrbox" hidden><p>No celular: WhatsApp > Aparelhos conectados > Conectar aparelho.</p><img id="qr" alt="QR Code"><div id="code" class="code"></div></div>
+  <div id="actions">
+    <button onclick="connect()">Conectar com QR Code</button>
+    <input id="phone" placeholder="ou digite seu número com DDI (5511999998888)" style="margin-top:10px">
+    <button class="sec" onclick="connect(phone.value)">Conectar por número</button>
+  </div>
+  <button id="out" class="sec" onclick="api('/api/logout',{method:'POST'})" hidden>Desconectar</button>
+</section>
+
+<section id="ctc" hidden>
+  <h2>2. Escolher contatos</h2>
+  <input id="q" placeholder="Buscar por nome ou número" oninput="draw()">
+  <p class="mute"><button class="sec" onclick="all(true)">Marcar visíveis</button><button class="sec" onclick="all(false)">Limpar</button> <span id="cnt"></span></p>
+  <div id="box"></div>
+  <h2 style="margin-top:14px">Listas salvas</h2>
+  <select id="saved" onchange="loadList()"></select>
+  <button class="sec" onclick="saveList()">Salvar seleção como lista</button>
+</section>
+
+<section id="snd" hidden>
+  <h2>3. Mensagem</h2>
+  <textarea id="text" rows="4" placeholder="Oi {nome}, tudo bem? …"></textarea>
+  <p class="mute">{nome} vira o primeiro nome de cada contato. Intervalo de 8 a 20 s entre envios; máximo de 200 por vez.</p>
+  <button onclick="send()">Enviar</button><button class="sec" onclick="api('/api/stop',{method:'POST'})">Parar</button>
+  <p id="prog" role="status"></p>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let contacts=[],sel=new Set(),loaded=false;
+async function api(u,o){const r=await fetch(u,o&&{...o,headers:{'Content-Type':'application/json'},body:o.body&&JSON.stringify(o.body)});const j=await r.json();if(!r.ok)alert(j.error);return j}
+const connect=phone=>api('/api/connect',{method:'POST',body:{phone}});
+async function poll(){
+  const s=await api('/api/status'),on=s.status==='conectado';
+  $('st').textContent=on?'Conectado.':s.status==='aguardando'?'Aguardando você escanear ou digitar o código.':s.status==='iniciando'?'Iniciando… pode levar até 1 minuto.':'Desconectado.';
+  $('qrbox').hidden=!(s.qr||s.code);$('qr').hidden=!s.qr;if(s.qr)$('qr').src=s.qr;$('code').textContent=s.code||'';
+  $('actions').hidden=on||s.status!=='desconectado';$('out').hidden=!on;$('ctc').hidden=$('snd').hidden=!on;
+  if(on&&!loaded){loaded=true;contacts=await api('/api/contacts');draw();refreshSaved()}
+  if(!on)loaded=false;
+  const j=s.job;$('prog').textContent=j.total?`${j.done}/${j.total} enviadas${j.running?'…':' — concluído'}`+(j.failed.length?`\nFalhas: ${j.failed.join('; ')}`:''):'';
+}
+function visible(){const t=$('q').value.toLowerCase();return contacts.filter(c=>c.name.toLowerCase().includes(t)||c.number.includes(t))}
+function draw(){
+  $('box').innerHTML=visible().map(c=>`<label class="c"><input type="checkbox" ${sel.has(c.number)?'checked':''} onchange="tog('${c.number}',this.checked)">${c.name}<span class="mute">&nbsp;${c.number}</span></label>`).join('')||'<p class="mute" style="padding:10px">Nenhum contato encontrado.</p>';
+  $('cnt').textContent=`${sel.size} selecionados de ${contacts.length}`;
+}
+function tog(n,v){v?sel.add(n):sel.delete(n);$('cnt').textContent=`${sel.size} selecionados de ${contacts.length}`}
+function all(v){visible().forEach(c=>v?sel.add(c.number):sel.delete(c.number));if(!v)sel.clear();draw()}
+const lists=()=>JSON.parse(localStorage.getItem('listas')||'{}');
+function refreshSaved(){$('saved').innerHTML='<option value="">— escolher lista salva —</option>'+Object.keys(lists()).map(n=>`<option>${n}</option>`).join('')}
+function saveList(){const n=prompt('Nome da lista:');if(!n||!sel.size)return;const l=lists();l[n]=[...sel];localStorage.setItem('listas',JSON.stringify(l));refreshSaved()}
+function loadList(){const l=lists()[$('saved').value];if(!l)return;sel=new Set(l);draw()}
+function send(){
+  const chosen=contacts.filter(c=>sel.has(c.number));
+  if(confirm(`Enviar para ${chosen.length} contato(s)?`))api('/api/send',{method:'POST',body:{contacts:chosen,text:$('text').value}});
+}
+poll();setInterval(poll,2500);
+</script>
+</body>
+</html>
